@@ -7,8 +7,8 @@ set -e
 #  - installs a JDK
 #  - installs Maven
 # 
-# Michael Albert info@michlstechblog.info
-# 09.04.2018
+# Omar Hamada
+# 16.06.2024
 # 
 #
 # Currently state is experimental
@@ -44,10 +44,9 @@ export CALIMERO_CONFIG_PATH=/etc/calimero
 # Bin Path
 export BIN_PATH=/usr/local/bin
 # export SERIAL_INTERFACE=ttyS3
-export SERIAL_INTERFACE_ORANGE_PI=ttyS3
 export SERIAL_INTERFACE_RASPBERRY_PI=ttyAMA0
 # Default, would be overwritten from hardware detection
-export SERIAL_INTERFACE=ttyS0
+export SERIAL_INTERFACE=ttyAMA0
 # KNX_ROUTING => true or false
 export KNX_ROUTING=true
 # If routing is enabled set a valid Coupler KNX Address x.x.0
@@ -68,7 +67,7 @@ export CALIMERO_SERVER_GROUP=knx
 # Application data directory
 export CALIMERO_SERVER_APP_DATA=/home/$CALIMERO_SERVER_USER/.calimero-server
 # KNX Server Name
-export KNX_SERVER_NAME="Calimero KNXnet/IP Server"
+export KNX_SERVER_NAME="Smartium KNXnet/IP Server"
 # Branch to use 
 
 export GIT_BRANCH="master"
@@ -184,10 +183,10 @@ fi
 # Detect RPI 3
 # Disable error handling
 set +e
-dmesg |grep -i "Raspberry Pi 3" > /dev/null
+dmesg |grep -i "Raspberry Pi 4" > /dev/null
 if [ $? -eq 0 ]; then
-	echo Raspberry 3 found!
-	export IS_RASPBERRY_3=1
+	echo Raspberry 4 found!
+	export IS_RASPBERRY_4=1
 fi
 # Enable error handling
 set -e
@@ -206,21 +205,21 @@ if [ -z $HARDWARE ]; then
 fi
 ######################## CPU Architecture #####################################
 set +e
-arch|grep -i arm > /dev/null
-if [ $? -eq 0 ]; then
-	echo CPU architecture ARM
-	export ARCH=ARM
-fi
-arch|grep -i x86_64 > /dev/null
-if [ $? -eq 0 ]; then
-	echo CPU architecture x64
-	export ARCH=X64
+arch=$(uname -m)
+if [[ "$arch" == "aarch64" ]]; then
+    echo "CPU architecture ARM64"
+    export ARCH="ARM64"
+elif [[ "$arch" == "armv7l" ]]; then
+    echo "CPU architecture ARM"
+    export ARCH="ARM"
+elif [[ "$arch" == "x86_64" ]]; then
+    echo "CPU architecture x64"
+    export ARCH="X64"
+else
+    echo "Unknown CPU architecture $arch"
+    exit 2
 fi
 set -e
-if [ -z $ARCH ]; then
-	echo Unknown CPU architecture $(arch)
-	exit 2
-fi
 
 ############################ Build Directory ##################################
 if [ ! -d $CALIMERO_BUILD ]; then
@@ -325,9 +324,9 @@ set -e
 
 # On Raspberry add user pi to group $CALIMERO_SERVER_GROUP
 set +e
-getent passwd pi
+getent passwd omar
 if [ $? -eq 0 ]; then
-	usermod -a -G $CALIMERO_SERVER_GROUP pi
+	usermod -a -G $CALIMERO_SERVER_GROUP omar
 fi	
 usermod -a -G $CALIMERO_SERVER_GROUP $(logname)
 set -e
@@ -461,14 +460,16 @@ clone_update_repo serial-native $GIT_BRANCH
 xmlstarlet ed --inplace -N x=http://maven.apache.org/POM/4.0.0 -u 'x:project/x:properties/x:java.home' -v "$JAVA_HOME_PATH" pom.xml
 # Compile
 mvn clean nar:nar-compile -Denforcer.skip=true
-# cp ./target/nar/serial-native-2.3-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-# cp ./target/nar/serial-native-2.3-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-if [ $ARCH = "ARM" ]; then
-	#cp ./target/nar/serial-native-2.3-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-	cp ./target/nar/serial-native-*-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-elif [ $ARCH = "X64" ]; then
-	#cp ./target/nar/serial-native-2.3-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-	cp ./target/nar/serial-native-*-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
+
+if [ "$ARCH" = "ARM64" ]; then
+    cp ./target/nar/serial-native-*-aarch64-Linux-gpp-jni/lib/aarch64-Linux-gpp/jni/libserialcom.so "$JAVA_LIB_PATH"
+elif [ "$ARCH" = "ARM" ]; then
+    cp ./target/nar/serial-native-*-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so "$JAVA_LIB_PATH"
+elif [ "$ARCH" = "X64" ]; then
+    cp ./target/nar/serial-native-*-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so "$JAVA_LIB_PATH"
+else
+    echo "Unsupported architecture: $ARCH"
+    exit 1
 fi
 
 # calimero-rxtx
@@ -706,22 +707,22 @@ if [ $HARDWARE = "Orange" ]; then
 elif [ $HARDWARE = "Raspi" ]; then
 	# Raspberry
 	echo Alter Raspberry Hardware settings
-	if [ "$IS_RASPBERRY_3" == "1" ]; then
-		sed -e's/ console=ttyAMA0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/cmdline.txt --in-place=.bak
-		sed -e's/ console=serial0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/cmdline.txt --in-place=.bak2
-		sed -e's/ console=ttyS0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/cmdline.txt --in-place=.bak4
-		sed -e's/ console=ttyACM0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/cmdline.txt --in-place=.bak6
+	if [ "$IS_RASPBERRY_4" == "1" ]; then
+		sed -e's/ console=ttyAMA0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/firmware/cmdline.txt --in-place=.bak
+		sed -e's/ console=serial0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/firmware/cmdline.txt --in-place=.bak2
+		sed -e's/ console=ttyS0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/firmware/cmdline.txt --in-place=.bak4
+		sed -e's/ console=ttyACM0,115200/ enable_uart=1 dtoverlay=pi3-disable-bt/g' /boot/firmware/cmdline.txt --in-place=.bak6
 		systemctl disable hciuart
 	else
-		sed -e's/ console=ttyAMA0,115200//g' /boot/cmdline.txt --in-place=.bak
-		sed -e's/ console=serial0,115200//g' /boot/cmdline.txt --in-place=.bak2
-		sed -e's/ console=ttyS0,115200//g' /boot/cmdline.txt --in-place=.bak4
-		sed -e's/ console=ttyACM0,115200//g' /boot/cmdline.txt --in-place=.bak6
+		sed -e's/ console=ttyAMA0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak
+		sed -e's/ console=serial0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak2
+		sed -e's/ console=ttyS0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak4
+		sed -e's/ console=ttyACM0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak6
 	fi
-	sed -e's/ kgdboc=ttyAMA0,115200//g' /boot/cmdline.txt --in-place=.bak1
-	sed -e's/ kgdboc=serial0,115200//g' /boot/cmdline.txt --in-place=.bak3
-	sed -e's/ kgdboc=ttyS0,115200//g' /boot/cmdline.txt --in-place=.bak5
-	sed -e's/ kgdboc=ttyACM0,115200//g' /boot/cmdline.txt --in-place=.bak7
+	sed -e's/ kgdboc=ttyAMA0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak1
+	sed -e's/ kgdboc=serial0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak3
+	sed -e's/ kgdboc=ttyS0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak5
+	sed -e's/ kgdboc=ttyACM0,115200//g' /boot/firmware/cmdline.txt --in-place=.bak7
 
 	# Disable serial console
 	systemctl disable serial-getty@ttyAMA0.service > /dev/null 2>&1
